@@ -1,4 +1,10 @@
-import time, random, numpy as np, argparse, sys, re, os
+import time
+import random
+import numpy as np
+import argparse
+import sys
+import re
+import os
 from types import SimpleNamespace
 
 import torch
@@ -13,8 +19,10 @@ from optimizer import AdamW
 from tqdm import tqdm
 
 
-TQDM_DISABLE=True
+TQDM_DISABLE = True
 # fix the random seed
+
+
 def seed_everything(seed=11711):
     random.seed(seed)
     np.random.seed(seed)
@@ -24,11 +32,15 @@ def seed_everything(seed=11711):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+
 class BertSentClassifier(torch.nn.Module):
     def __init__(self, config):
         super(BertSentClassifier, self).__init__()
         self.num_labels = config.num_labels
         self.bert = BertModel.from_pretrained('bert-base-uncased')
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = torch.nn.Linear(
+            config.hidden_size, config.num_labels)
 
         # pretrain mode does not require updating bert paramters.
         for param in self.bert.parameters():
@@ -38,14 +50,24 @@ class BertSentClassifier(torch.nn.Module):
                 param.requires_grad = True
 
         # todo
+        self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = torch.nn.Linear(
+            config.hidden_size, config.num_labels)
         raise NotImplementedError
 
     def forward(self, input_ids, attention_mask):
+        output = self.bert(input_ids=input_ids, attention_mask=attention_mask)[
+            'pooler_output']
+        output = self.dropout(output)
+        logits = self.classifier(output)
+        return F.log_softmax(logits, dim=1)
         # todo
         # the final bert contextualize embedding is the hidden state of [CLS] token (the first token)
         raise NotImplementedError
 
 # create a custom Dataset Class to be used for the dataloader
+
+
 class BertDataset(Dataset):
     def __init__(self, dataset, args):
         self.dataset = dataset
@@ -62,7 +84,8 @@ class BertDataset(Dataset):
     def pad_data(self, data):
         sents = [x[0] for x in data]
         labels = [x[1] for x in data]
-        encoding = self.tokenizer(sents, return_tensors='pt', padding=True, truncation=True)
+        encoding = self.tokenizer(
+            sents, return_tensors='pt', padding=True, truncation=True)
         token_ids = torch.LongTensor(encoding['input_ids'])
         attention_mask = torch.LongTensor(encoding['attention_mask'])
         token_type_ids = torch.LongTensor(encoding['token_type_ids'])
@@ -72,14 +95,15 @@ class BertDataset(Dataset):
 
     def collate_fn(self, all_data):
 
-        token_ids, token_type_ids, attention_mask, labels, sents = self.pad_data(all_data)
+        token_ids, token_type_ids, attention_mask, labels, sents = self.pad_data(
+            all_data)
         batched_data = {
-                'token_ids': token_ids,
-                'token_type_ids': token_type_ids,
-                'attention_mask': attention_mask,
-                'labels': labels,
-                'sents': sents,
-            }
+            'token_ids': token_ids,
+            'token_type_ids': token_type_ids,
+            'attention_mask': attention_mask,
+            'labels': labels,
+            'sents': sents,
+        }
 
         return batched_data
 
@@ -107,14 +131,16 @@ def create_data(filename, flag='train'):
         return data
 
 # perform model evaluation in terms of the accuracy and f1 score.
+
+
 def model_eval(dataloader, model, device):
-    model.eval() # switch to eval model, will turn off randomness like dropout
+    model.eval()  # switch to eval model, will turn off randomness like dropout
     y_true = []
     y_pred = []
     sents = []
     for step, batch in enumerate(tqdm(dataloader, desc=f'eval', disable=TQDM_DISABLE)):
         b_ids, b_type_ids, b_mask, b_labels, b_sents = batch['token_ids'], batch['token_type_ids'], \
-                                                       batch['attention_mask'], batch['labels'], batch['sents']
+            batch['attention_mask'], batch['labels'], batch['sents']
 
         b_ids = b_ids.to(device)
         b_mask = b_mask.to(device)
@@ -133,6 +159,7 @@ def model_eval(dataloader, model, device):
 
     return acc, f1, y_pred, y_true, sents
 
+
 def save_model(model, optimizer, args, config, filepath):
     save_info = {
         'model': model.state_dict(),
@@ -147,9 +174,10 @@ def save_model(model, optimizer, args, config, filepath):
     torch.save(save_info, filepath)
     print(f"save the model to {filepath}")
 
+
 def train(args):
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-    #### Load data
+    # Load data
     # create the data and its corresponding datasets and dataloader
     train_data, num_labels = create_data(args.train, 'train')
     dev_data = create_data(args.dev, 'valid')
@@ -162,7 +190,7 @@ def train(args):
     dev_dataloader = DataLoader(dev_dataset, shuffle=False, batch_size=args.batch_size,
                                 collate_fn=dev_dataset.collate_fn)
 
-    #### Init model
+    # Init model
     config = {'hidden_dropout_prob': args.hidden_dropout_prob,
               'num_labels': num_labels,
               'hidden_size': 768,
@@ -176,11 +204,11 @@ def train(args):
     model = model.to(device)
 
     lr = args.lr
-    ## specify the optimizer
+    # specify the optimizer
     optimizer = AdamW(model.parameters(), lr=lr)
     best_dev_acc = 0
 
-    ## run for the specified number of epochs
+    # run for the specified number of epochs
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0
@@ -195,7 +223,8 @@ def train(args):
 
             optimizer.zero_grad()
             logits = model(b_ids, b_mask)
-            loss = F.nll_loss(logits, b_labels.view(-1), reduction='sum') / args.batch_size
+            loss = F.nll_loss(logits, b_labels.view(-1),
+                              reduction='sum') / args.batch_size
 
             loss.backward()
             optimizer.step()
@@ -212,7 +241,8 @@ def train(args):
             best_dev_acc = dev_acc
             save_model(model, optimizer, args, config, args.filepath)
 
-        print(f"epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_acc :.3f}, dev acc :: {dev_acc :.3f}")
+        print(
+            f"epoch {epoch}: train loss :: {train_loss :.3f}, train acc :: {train_acc :.3f}, dev acc :: {dev_acc :.3f}")
 
 
 def test(args):
@@ -226,15 +256,18 @@ def test(args):
         print(f"load model from {args.filepath}")
         dev_data = create_data(args.dev, 'valid')
         dev_dataset = BertDataset(dev_data, args)
-        dev_dataloader = DataLoader(dev_dataset, shuffle=False, batch_size=args.batch_size, collate_fn=dev_dataset.collate_fn)
+        dev_dataloader = DataLoader(
+            dev_dataset, shuffle=False, batch_size=args.batch_size, collate_fn=dev_dataset.collate_fn)
 
         test_data = create_data(args.test, 'test')
         test_dataset = BertDataset(test_data, args)
-        test_dataloader = DataLoader(test_dataset, shuffle=False, batch_size=args.batch_size, collate_fn=test_dataset.collate_fn)
+        test_dataloader = DataLoader(
+            test_dataset, shuffle=False, batch_size=args.batch_size, collate_fn=test_dataset.collate_fn)
 
-        dev_acc, dev_f1, dev_pred, dev_true, dev_sents = model_eval(dev_dataloader, model, device)
-        test_acc, test_f1, test_pred, test_true, test_sents = model_eval(test_dataloader, model, device)
-
+        dev_acc, dev_f1, dev_pred, dev_true, dev_sents = model_eval(
+            dev_dataloader, model, device)
+        test_acc, test_f1, test_pred, test_true, test_sents = model_eval(
+            test_dataloader, model, device)
         with open(args.dev_out, "w+") as f:
             print(f"dev acc :: {dev_acc :.3f}")
             for s, p in zip(dev_sents, dev_pred):
@@ -244,6 +277,7 @@ def test(args):
             print(f"test acc :: {test_acc :.3f}")
             for s, p in zip(test_sents, test_pred):
                 f.write(f"{p} ||| {s}\n")
+
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -257,10 +291,12 @@ def get_args():
                         choices=('pretrain', 'finetune'), default="pretrain")
     parser.add_argument("--use_gpu", action='store_true')
     parser.add_argument("--dev_out", type=str, default="cfimdb-dev-output.txt")
-    parser.add_argument("--test_out", type=str, default="cfimdb-test-output.txt")
+    parser.add_argument("--test_out", type=str,
+                        default="cfimdb-test-output.txt")
 
     # hyper parameters
-    parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
+    parser.add_argument(
+        "--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
     parser.add_argument("--hidden_dropout_prob", type=float, default=0.3)
     parser.add_argument("--lr", type=float, help="learning rate, default lr for 'pretrain': 1e-3, 'finetune': 1e-5",
                         default=1e-5)
@@ -269,9 +305,10 @@ def get_args():
     print(f"args: {vars(args)}")
     return args
 
+
 if __name__ == "__main__":
     args = get_args()
-    args.filepath = f'{args.option}-{args.epochs}-{args.lr}.pt' # save path
+    args.filepath = f'{args.option}-{args.epochs}-{args.lr}.pt'  # save path
     seed_everything(args.seed)  # fix the seed for reproducibility
     train(args)
     test(args)

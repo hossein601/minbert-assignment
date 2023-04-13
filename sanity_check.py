@@ -5,7 +5,7 @@ sanity_data = torch.load("./sanity_check.data")
 # tokenizer here
 sent_ids = torch.tensor([[101, 7592, 2088, 102, 0, 0, 0, 0],
                          [101, 7592, 15756, 2897, 2005, 17953, 2361, 102]])
-att_mask = torch.tensor([[1, 1, 1, 1, 0, 0, 0, 0],[1, 1, 1, 1, 1, 1, 1, 1]])
+att_mask = torch.tensor([[1, 1, 1, 1, 0, 0, 0, 0], [1, 1, 1, 1, 1, 1, 1, 1]])
 
 # load our model
 bert = BertModel.from_pretrained('bert-base-uncased')
@@ -17,4 +17,3 @@ sanity_data['last_hidden_state'] = sanity_data['last_hidden_state'] * att_mask
 for k in ['last_hidden_state', 'pooler_output']:
     assert torch.allclose(outputs[k], sanity_data[k], atol=1e-5, rtol=1e-3)
 print("Your BERT implementation is correct!")
-
